@@ -36,9 +36,9 @@ find $source_dir/* ! -name $requirements_filename -maxdepth 1 -exec rm -rf {} +
 echo "----------------------------------------------------"
 echo "Install new packages"
 
-PYTHONPATH=$build_dir \
-  python \
-  build/pip install \
+pip install --upgrade pip setuptools wheel
+
+pip install \
   --target $source_dir \
   --no-deps \
   -r $source_requirements
