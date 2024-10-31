@@ -78,61 +78,6 @@ class Updater(object):
             "bin",
         )
 
-        # paths for final requirements files
-        self._source_reqs_3_7_dir = os.path.join(
-            self._sources_dir,
-            "3.7",
-        )
-        self._source_reqs_3_7_path = os.path.join(
-            self._source_reqs_3_7_dir,
-            "explicit_requirements.txt"
-        )
-
-        self._source_reqs_3_9_dir = os.path.join(
-            self._sources_dir,
-            "3.9",
-        )
-        self._source_reqs_3_9_path = os.path.join(
-            self._source_reqs_3_9_dir,
-            "explicit_requirements.txt"
-        )
-
-        self._source_reqs_3_10_dir = os.path.join(
-            self._sources_dir,
-            "3.10",
-        )
-        self._source_reqs_3_10_path = os.path.join(
-            self._source_reqs_3_10_dir,
-            "explicit_requirements.txt"
-        )
-
-        self._bin_reqs_3_7_dir = os.path.join(
-            self._bin_dir,
-            "3.7",
-        )
-        self._bin_reqs_3_7_path = os.path.join(
-            self._bin_reqs_3_7_dir,
-            "explicit_requirements.txt"
-        )
-
-        self._bin_reqs_3_9_dir = os.path.join(
-            self._bin_dir,
-            "3.9",
-        )
-        self._bin_reqs_3_9_path = os.path.join(
-            self._bin_reqs_3_9_dir,
-            "explicit_requirements.txt"
-        )
-
-        self._bin_reqs_3_10_dir = os.path.join(
-            self._bin_dir,
-            "3.10",
-        )
-        self._bin_reqs_3_10_path = os.path.join(
-            self._bin_reqs_3_10_dir,
-            "explicit_requirements.txt"
-        )
-
     def _pip_freeze(self):
         """List all packages installed."""
         output = self._pip("freeze").strip()
@@ -145,6 +90,8 @@ class Updater(object):
         """Uninstall all packages with pip."""
         # No matter why we are leaving this method, we should be removing
         # what was installed.
+        print("Cleaning PIP dependencies")
+        
         for dependency in self._pip_freeze():
             cmd = "uninstall -y {}".format(dependency)
             self._pip(cmd)
@@ -152,11 +99,18 @@ class Updater(object):
     def _pip(self, cmd):
         """Run the pip command."""
         pip_cmd = "python -m pip".split() + cmd.split()
-        output = subprocess.check_output(pip_cmd)
-
-        if self._is_python_3:
-            output = output.decode("utf-8")
-
+        try:
+            output = subprocess.check_output(pip_cmd)
+        except subprocess.CalledProcessError as e:
+            raise UpdateException(
+                "Error running pip command: {}\nReturn Code:{}\n{}".format(
+                    " ".join(pip_cmd),
+                    e.returncode,
+                    e.output,
+                )
+            )
+        
+        output = output.decode("utf-8")
         return output
 
     @staticmethod
@@ -167,12 +121,14 @@ class Updater(object):
 
     def _get_dependencies_to_install(self):
         """Retrieve the full list of dependencies after a pip install."""
-        if self._pip_freeze():
+        freeze_list = self._pip_freeze()
+        if freeze_list:
             raise UpdateException(
                 "Please clean up your Python installation from any "
                 "dependencies by uninstalling all of them or pip freeze "
                 "will contain too many dependencies.\nYou can clean pip "
-                "using `update_requirements.py --clean-pip`"
+                "using `update_requirements.py --clean-pip`.\n"
+                f"List of detected dependencies: {freeze_list}"
             )
 
         try:
@@ -180,6 +136,7 @@ class Updater(object):
             self._pip("install -r requirements/{}/requirements.txt".format(
                 self._python_version_dot_format
             ))
+            print("All dependencies installed.")
 
             # list everything that was installed.
             freeze_list = self._pip_freeze()
@@ -195,15 +152,27 @@ class Updater(object):
         """
         Update the requirement files.
         """
-        version = self._python_version_underscore_format
-        source_dir = getattr(self, "_source_reqs_{}_dir".format(version))
-        source_reqs_path = getattr(self, "_source_reqs_{}_path".format(
-            version))
-        bin_dir = getattr(self, "_bin_reqs_{}_dir".format(version))
-        bin_reqs_path = getattr(self, "_bin_reqs_{}_path".format(version))
+        source_dir = os.path.join(
+            self._sources_dir,
+            self._python_version_dot_format,
+        )
+        source_reqs_path = os.path.join(
+            source_dir,
+            "explicit_requirements.txt"
+        )
+        bin_dir = os.path.join(
+            self._bin_dir,
+            self._python_version_dot_format,
+        )
+        bin_reqs_path = os.path.join(
+            bin_dir,
+            "explicit_requirements.txt"
+        )
+        print(f"Writing files {source_reqs_path}, {bin_reqs_path}")
 
         for path in [source_dir, bin_dir]:
             if not os.path.isdir(path):
+                print(f"Creating directory {path}")
                 os.makedirs(path)
 
         with open(source_reqs_path, 'w') as source_handler, \
@@ -218,8 +187,8 @@ class Updater(object):
                 # Prioritized wheels require GLIBC 2.28 (manylinux_2_28_x86_64) which is not available on CentOS 7.
                 # Then, we download manylinux_2_17_x86_64 from PyPI.
                 if package_name == "cryptography":
-                    dependency = "cryptography==42.0.4 ; sys_platform != 'linux'\n"
-                    dependency += "https://files.pythonhosted.org/packages/2f/d1/6ca412147384b0b02cb343a3e8b7d3fde7ac6833c29fee9ca91f59ab5fdf/cryptography-42.0.4-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl ; sys_platform == 'linux'"
+                    dependency = "cryptography==43.0.1 ; sys_platform != 'linux'\n"
+                    dependency += "https://files.pythonhosted.org/packages/5e/4b/39bb3c4c8cfb3e94e736b8d8859ce5c81536e91a1033b1d26770c4249000/cryptography-43.0.1-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl ; sys_platform == 'linux'"
 
 
                 # Figure which type of dependency it is and write
@@ -240,6 +209,8 @@ class Updater(object):
             self._clean_pip()
 
         dependencies = self._get_dependencies_to_install()
+        print(f"List of dependencies to install: {dependencies}")
+
         self._update_requirements_file(dependencies)
 
 

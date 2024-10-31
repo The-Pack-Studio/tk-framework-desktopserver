@@ -25,7 +25,11 @@ from .message import Message
 from .logger import get_logger
 
 from tank_vendor.six.moves.urllib.parse import urlparse
-from tank_vendor import six
+
+try:
+    from tank_vendor import sgutils
+except ImportError:
+    from tank_vendor import six as sgutils
 
 logger = get_logger(__name__)
 
@@ -41,14 +45,14 @@ class ServerProtocol(WebSocketServerProtocol):
         ENCRYPTION_HANDSHAKE_NOT_COMPLETED,
         ENCRYPTION_NOT_SUPPORTED,
     ) = (
-        (3000, u"No user information was found in this request."),
+        (3000, "No user information was found in this request."),
         (
             3001,
-            u"You are not authorized to make browser integration requests. "
-            u"Please re-authenticate in your desktop application.",
+            "You are not authorized to make browser integration requests. "
+            "Please re-authenticate in your desktop application.",
         ),
-        (3002, u"Attempted to communicate without completing encryption handshake."),
-        (3003, u"Client asked for server id when encryption is not supported."),
+        (3002, "Attempted to communicate without completing encryption handshake."),
+        (3003, "Client asked for server id when encryption is not supported."),
     )
 
     # Initial state is v2. This might change if we end up receiving a connection
@@ -89,15 +93,22 @@ class ServerProtocol(WebSocketServerProtocol):
             # Known certificate error. These work for firefox and safari, but chrome rejected certificate
             # are currently indistinguishable from lost connection. This is true as of July 21st, 2015.
             certificate_error = False
-            certificate_error |= (
-                reason.type is OpenSSL.SSL.Error
-                and reason.value.message[0][2] == "ssl handshake failure"
-            )
-            certificate_error |= (
-                reason.type is OpenSSL.SSL.Error
-                and reason.value.message[0][2] == "tlsv1 alert unknown ca"
-            )
+            try:
+                message = reason.value.message[0][2]
+            except (AttributeError, IndexError):
+                logger.warning("Unexpected error message in object: {}".format(reason))
+            else:
+                certificate_error |= (
+                    reason.type is OpenSSL.SSL.Error
+                    and message == "ssl handshake failure"
+                )
+                certificate_error |= (
+                    reason.type is OpenSSL.SSL.Error
+                    and message == "tlsv1 alert unknown ca"
+                )
+
             certificate_error |= bool(reason.check(error.CertificateError))
+            certificate_error |= bool(reason.check(error.ConnectionLost))
 
             if certificate_error:
                 logger.info("Certificate error!")
@@ -157,7 +168,7 @@ class ServerProtocol(WebSocketServerProtocol):
                 logger.exception("Unexpected error while decrypting:")
                 return
 
-        decoded_payload = six.ensure_str(payload)
+        decoded_payload = sgutils.ensure_str(payload)
 
         # Special message to get protocol version for this protocol. This message doesn't follow the
         # standard message format as it doesn't require a protocol version to be retrieved and is
@@ -221,7 +232,10 @@ class ServerProtocol(WebSocketServerProtocol):
         # a file. This will ensure the server is as responsive as possible. Twisted will take care
         # of the thread.
         reactor.callInThread(
-            self._process_message, message_host, message, message["protocol_version"],
+            self._process_message,
+            message_host,
+            message,
+            message["protocol_version"],
         )
 
     def _validate_user(self, user_id):
@@ -348,7 +362,7 @@ class ServerProtocol(WebSocketServerProtocol):
             response = shotgun._call_rpc(
                 "retrieve_ws_server_secret", {"ws_server_id": self.factory.ws_server_id}
             )
-            ws_server_secret = six.ensure_str(response["ws_server_secret"])
+            ws_server_secret = sgutils.ensure_str(response["ws_server_secret"])
             # FIXME: Server doesn't seem to provide a properly padded string. The Javascript side
             # doesn't seem to complain however, so I'm not sure whose implementation is broken.
             if ws_server_secret[-1] != "=":
@@ -359,7 +373,6 @@ class ServerProtocol(WebSocketServerProtocol):
         return self._ws_server_secret
 
     def _process_message(self, message_host, message, protocol_version):
-
         # Retrieve command from message
         command = message["command"]
 
@@ -436,8 +449,12 @@ class ServerProtocol(WebSocketServerProtocol):
         :param data: Object Data that will be converted to JSON and sent to client.
         """
         # ensure_ascii allows unicode strings.
-        payload = six.ensure_binary(
-            json.dumps(data, ensure_ascii=True, default=self._json_date_handler,)
+        payload = sgutils.ensure_binary(
+            json.dumps(
+                data,
+                ensure_ascii=True,
+                default=self._json_date_handler,
+            )
         )
 
         if self._fernet:
